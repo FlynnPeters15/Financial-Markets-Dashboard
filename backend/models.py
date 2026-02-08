@@ -51,6 +51,7 @@ class CompanyQuote(BaseModel):
     low: float = 0.0
     change: float = 0.0
     pctChange: float = 0.0
+    marketCap: Optional[float] = None  # Market cap in USD
     status: str = "ok"  # "ok" | "error"
     error: Optional[str] = None
     source: str = "finnhub"  # "finnhub" | "cache" | "stale_cache"

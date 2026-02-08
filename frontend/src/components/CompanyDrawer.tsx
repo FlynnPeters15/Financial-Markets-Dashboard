@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ExternalLink } from 'lucide-react';
 import { CompanyQuote } from '../lib/api';
-import { formatPercent, formatCurrency, formatNumber } from '../lib/format';
+import { formatPercent, formatCurrency, formatNumber, formatMarketCap } from '../lib/format';
 
 interface CompanyDrawerProps {
   company: CompanyQuote | null;
@@ -63,6 +63,14 @@ export function CompanyDrawer({ company, isOpen, onClose }: CompanyDrawerProps) 
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-muted/50 rounded-lg">
+                  <div className="text-sm text-muted-foreground mb-1">Market Cap</div>
+                  <div className="text-lg font-semibold">
+                    {company.marketCap && company.marketCap > 0 
+                      ? formatMarketCap(company.marketCap)
+                      : '—'}
+                  </div>
+                </div>
                 <div className="p-4 bg-muted/50 rounded-lg">
                   <div className="text-sm text-muted-foreground mb-1">Close</div>
                   <div className="text-lg font-semibold">

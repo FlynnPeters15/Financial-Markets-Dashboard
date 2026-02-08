@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001';
+// Use relative paths when in dev (Vite proxy) or absolute URL in production
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 export interface CompanyQuote {
   symbol: string;
@@ -11,6 +12,7 @@ export interface CompanyQuote {
   low: number | null;
   change: number | null;
   pctChange: number | null;
+  marketCap?: number | null;
   status: string;
   error?: string | null;
   source: string;
@@ -59,7 +61,8 @@ class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public statusText: string
+    public statusText: string,
+    public responseBody?: any
   ) {
     super(message);
     this.name = 'ApiError';
@@ -71,14 +74,16 @@ class ApiClient {
   private abortControllers: Map<string, AbortController> = new Map();
 
   constructor(baseURL: string) {
-    this.baseURL = baseURL.replace(/\/$/, '');
+    // Use relative paths if baseURL is empty (dev mode with proxy)
+    this.baseURL = baseURL ? baseURL.replace(/\/$/, '') : '';
   }
 
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
+    // Use relative path if baseURL is empty (dev mode with Vite proxy)
+    const url = this.baseURL ? `${this.baseURL}${endpoint}` : endpoint;
     const controller = new AbortController();
     const key = `${options.method || 'GET'}:${endpoint}`;
     
@@ -88,6 +93,8 @@ class ApiClient {
       prevController.abort();
     }
     this.abortControllers.set(key, controller);
+
+    const isDev = import.meta.env.DEV;
 
     try {
       const response = await fetch(url, {
@@ -99,11 +106,65 @@ class ApiClient {
         },
       });
 
+      // Log request details in dev mode
+      if (isDev) {
+        console.log(`[API] ${options.method || 'GET'} ${endpoint}`, {
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
+
       if (!response.ok) {
+        // Try to parse error response as JSON, fallback to text
+        let errorBody: any = null;
+        const contentType = response.headers.get('content-type');
+        
+        try {
+          if (contentType && contentType.includes('application/json')) {
+            errorBody = await response.json();
+          } else {
+            errorBody = await response.text();
+          }
+        } catch (parseError) {
+          // If parsing fails, use status text
+          errorBody = response.statusText;
+        }
+
+        // Log error details in dev mode
+        if (isDev) {
+          console.error(`[API Error] ${options.method || 'GET'} ${endpoint}`, {
+            status: response.status,
+            statusText: response.statusText,
+            body: errorBody,
+          });
+        }
+
+        // Create user-friendly error message
+        let errorMessage = `API request failed: ${response.statusText}`;
+        if (response.status === 429) {
+          errorMessage = 'Rate limit exceeded. Please try again later.';
+          if (errorBody && typeof errorBody === 'object' && errorBody.detail?.message) {
+            errorMessage = errorBody.detail.message;
+          }
+        } else if (errorBody) {
+          if (typeof errorBody === 'object' && errorBody.detail) {
+            if (typeof errorBody.detail === 'string') {
+              errorMessage = errorBody.detail;
+            } else if (errorBody.detail.reason) {
+              errorMessage = errorBody.detail.reason;
+            } else if (errorBody.detail.message) {
+              errorMessage = errorBody.detail.message;
+            }
+          } else if (typeof errorBody === 'string') {
+            errorMessage = errorBody;
+          }
+        }
+
         throw new ApiError(
-          `API request failed: ${response.statusText}`,
+          errorMessage,
           response.status,
-          response.statusText
+          response.statusText,
+          errorBody
         );
       }
 
@@ -118,7 +179,13 @@ class ApiClient {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('Request aborted');
       }
-      throw new Error(`Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Network errors
+      const networkMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (isDev) {
+        console.error(`[API Network Error] ${options.method || 'GET'} ${endpoint}`, error);
+      }
+      throw new Error(`Network error: ${networkMessage}`);
     }
   }
 

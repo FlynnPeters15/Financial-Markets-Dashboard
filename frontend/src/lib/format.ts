@@ -20,6 +20,27 @@ export function formatNumber(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
+export function formatMarketCap(value: number | null | undefined): string {
+  if (value === null || value === undefined || isNaN(value) || value <= 0) {
+    return '—';
+  }
+  
+  // Format based on magnitude
+  if (value >= 1e12) {
+    // Trillions
+    return `$${(value / 1e12).toFixed(2)}T`;
+  } else if (value >= 1e9) {
+    // Billions
+    return `$${(value / 1e9).toFixed(2)}B`;
+  } else if (value >= 1e6) {
+    // Millions
+    return `$${(value / 1e6).toFixed(2)}M`;
+  } else {
+    // Thousands or less
+    return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  }
+}
+
 export function getColorForPercentChange(
   pctChange: number | null | undefined,
   status: string

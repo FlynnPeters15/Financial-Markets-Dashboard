@@ -19,6 +19,9 @@ class TokenBucketLimiter:
         self._tokens = float(self._max)
         self._last_refill = time.monotonic()
         self._lock = asyncio.Lock()
+        self._total_acquired = 0
+        self._total_denied = 0
+        logger.info("TokenBucketLimiter initialized: max=%d calls/min", self._max)
 
     def _refill(self) -> None:
         now = time.monotonic()
@@ -37,8 +40,23 @@ class TokenBucketLimiter:
             self._refill()
             if self._tokens >= 1:
                 self._tokens -= 1
+                self._total_acquired += 1
+                logger.debug("Token acquired: remaining=%.2f/%d", self._tokens, self._max)
                 return True
+            self._total_denied += 1
+            logger.warning("Rate limit: tokens=%.2f/%d, denied=%d", self._tokens, self._max, self._total_denied)
             return False
+
+    async def get_stats(self) -> dict:
+        """Return current limiter statistics for logging/debugging."""
+        async with self._lock:
+            self._refill()
+            return {
+                "tokens_remaining": round(self._tokens, 2),
+                "max_tokens": self._max,
+                "total_acquired": self._total_acquired,
+                "total_denied": self._total_denied,
+            }
 
 
 # Singleton

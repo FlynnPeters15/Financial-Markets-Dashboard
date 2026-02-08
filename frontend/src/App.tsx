@@ -21,9 +21,38 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [sizingMode, setSizingMode] = useState<'equal' | 'marketCap'>('marketCap');
 
   // Cache for sector data
   const [sectorCache, setSectorCache] = useState<Map<string, SectorResponse>>(new Map());
+
+  // Initial load: only fetch index and sectors list (not all sector data)
+  useEffect(() => {
+    const initialLoad = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Fetch index data for "All" tab
+        const index = await apiClient.getIndex();
+        setIndexData(index);
+        setLastUpdated(new Date(index.ts));
+        
+        // Note: We don't fetch /api/sectors here since SectorTabs uses hardcoded SECTORS
+        // But we could fetch it if needed for dynamic sector counts
+        setInitialLoadComplete(true);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to fetch index data';
+        setError(message);
+        setIndexData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initialLoad();
+  }, []); // Only run on mount
 
   const fetchSectorData = useCallback(async (sector: Sector, refresh = false) => {
     if (sector === 'All') {
@@ -51,6 +80,7 @@ function App() {
       setCompanies(cached.companies);
       setLastUpdated(new Date(cached.updated_at));
       setLoading(false);
+      setError(null); // Clear any previous errors when using cache
       return;
     }
 
@@ -69,8 +99,20 @@ function App() {
         return next;
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch data';
-      setError(message);
+      // Enhanced error handling
+      let errorMessage = 'Failed to fetch sector data';
+      let isRateLimit = false;
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        // Check if it's a rate limit error (429 or message contains rate limit)
+        if (errorMessage.toLowerCase().includes('rate limit') || 
+            (err as any).status === 429) {
+          isRateLimit = true;
+        }
+      }
+      
+      setError(errorMessage);
       
       // If we have cached data, use it
       if (sectorCache.has(sector)) {
@@ -85,9 +127,12 @@ function App() {
     }
   }, [sectorCache]);
 
+  // Fetch sector data when activeSector changes (but only after initial load)
   useEffect(() => {
-    fetchSectorData(activeSector);
-  }, [activeSector]);
+    if (initialLoadComplete) {
+      fetchSectorData(activeSector);
+    }
+  }, [activeSector, initialLoadComplete, fetchSectorData]);
 
   const handleRefresh = useCallback(() => {
     fetchSectorData(activeSector, true);
@@ -158,7 +203,7 @@ function App() {
           <ErrorToast
             message={error}
             onDismiss={() => setError(null)}
-            type={error.includes('429') ? 'warning' : 'error'}
+            type={error.toLowerCase().includes('rate limit') || error.includes('429') ? 'warning' : 'error'}
           />
         )}
 
@@ -220,23 +265,46 @@ function App() {
           <>
             {loading ? (
               <HeatmapSkeleton />
+            ) : filteredCompanies.length === 0 ? (
+              <div className="bg-card border border-border rounded-lg p-12 text-center">
+                <h3 className="text-xl font-semibold mb-2">No data available</h3>
+                <p className="text-muted-foreground mb-4">
+                  {error 
+                    ? 'Failed to load company data. Please try refreshing.'
+                    : 'No companies found in this sector.'}
+                </p>
+                {error && (
+                  <button
+                    onClick={handleRefresh}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
                 <HeatmapTreemap
                   data={filteredCompanies}
                   onNodeClick={handleCompanyClick}
+                  sizingMode={sizingMode}
+                  onSizingModeChange={setSizingMode}
                 />
               </div>
             )}
 
-            <div className="mt-6">
-              <HeatmapLegend />
-            </div>
+            {!loading && filteredCompanies.length > 0 && (
+              <>
+                <div className="mt-6">
+                  <HeatmapLegend />
+                </div>
 
-            {searchQuery && (
-              <div className="mt-4 text-sm text-muted-foreground">
-                Showing {filteredCompanies.length} of {companies.length} companies
-              </div>
+                {searchQuery && (
+                  <div className="mt-4 text-sm text-muted-foreground">
+                    Showing {filteredCompanies.length} of {companies.length} companies
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
